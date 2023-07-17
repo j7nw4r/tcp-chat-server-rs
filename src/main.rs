@@ -1,6 +1,4 @@
-use std::{io, time::Duration};
-
-use anyhow::{bail, Context};
+use anyhow::Context;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{
@@ -52,11 +50,11 @@ async fn read_future(
     broadcast_sender: Sender<String>,
 ) -> anyhow::Result<()> {
     loop {
-        let mut buf = vec![0u8; 1024];
+        let mut buf = vec![0u8; 1024 * 4];
         tcp_reader
             .readable()
             .await
-            .context("could not determine if tcp stream was reaable")?;
+            .context("could not determine if tcp stream was readable")?;
 
         let read_length = tcp_reader.read(&mut buf).await?;
         buf.truncate(read_length);
@@ -73,7 +71,6 @@ async fn write_future(
     mut broadcast_receiver: Receiver<String>,
 ) -> anyhow::Result<()> {
     loop {
-        info!("receiver length is {}", broadcast_receiver.len());
         let msg = broadcast_receiver.recv().await?;
         info!("sending: {}", msg);
         tcp_writer

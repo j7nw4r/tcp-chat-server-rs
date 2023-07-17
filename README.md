@@ -1,6 +1,6 @@
-# tcp-chat-server
+# tcp-chat-server-rs
 
-`tcp-chat-server` is a basic live chat server over raw TCP, implemented in Rust.
+`tcp-chat-server-rs` is a basic live chat server over raw TCP, implemented in Rust.
 
 ## Running
 
@@ -10,7 +10,7 @@ To run:
 cargo run
 ```
 
-When running `tcp-chat-server` exposes one websocket endpoint at `http://localhost:23234`.
+When running `tcp-chat-server-rs` exposes one websocket endpoint at `http://localhost:23234`.
 
 ## Sending messages
 

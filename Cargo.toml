@@ -1,5 +1,5 @@
 [package]
-name = "discord-tcp-chat-server"
+name = "tcp-chat-server-rs"
 version = "0.1.0"
 edition = "2021"
 

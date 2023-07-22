@@ -1,4 +1,5 @@
 use anyhow::Context;
+use bytes::{Bytes, BytesMut};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{
@@ -23,20 +24,28 @@ async fn main() -> anyhow::Result<()> {
             .accept()
             .await
             .context("could not accept from tcp_listener")?;
-
         info!("received connection from  {}", addr);
-        tokio::spawn(process_stream(tcp_stream, sender.clone()));
+
+        let sender = sender.clone();
+        tokio::spawn(async move {
+            match process_stream(tcp_stream, sender).await {
+                Ok(_) => (),
+                Err(e) => {
+                    info!("process_stream returned error: {}", e)
+                }
+            }
+        });
     }
 }
 async fn process_stream(stream: TcpStream, sender: Sender<String>) -> anyhow::Result<()> {
     let (tcp_reader, tcp_writer) = stream.into_split();
     let (broadcast_sender, broadcast_receiver) = (sender.clone(), sender.subscribe());
     if let Err(e) = tokio::select! {
-        read_result = read_future(tcp_reader, broadcast_sender) => {
+        read_result = read_tcp_write_chat(tcp_reader, broadcast_sender) => {
             info!("read_result returned");
             read_result
         },
-        write_result = write_future( tcp_writer, broadcast_receiver) => {
+        write_result = read_chat_write_tcp( tcp_writer, broadcast_receiver) => {
             info!("write_result returned");
             write_result},
     } {
@@ -45,12 +54,12 @@ async fn process_stream(stream: TcpStream, sender: Sender<String>) -> anyhow::Re
     Ok(())
 }
 
-async fn read_future(
+async fn read_tcp_write_chat(
     mut tcp_reader: OwnedReadHalf,
-    broadcast_sender: Sender<String>,
+    chat_sender: Sender<String>,
 ) -> anyhow::Result<()> {
     loop {
-        let mut buf = vec![0u8; 1024 * 4];
+        let mut buf = vec![0u8; 1024];
         tcp_reader
             .readable()
             .await
@@ -58,20 +67,20 @@ async fn read_future(
 
         let read_length = tcp_reader.read(&mut buf).await?;
         buf.truncate(read_length);
-        let msg = String::from_utf8(buf)?;
+        let msg = String::from_utf8(buf.to_vec())?;
         info!("read: {}", msg);
-        let send_result = broadcast_sender.send(msg);
+        let send_result = chat_sender.send(msg);
         if let Err(e) = send_result {
             error!("send_result : {}", e);
         }
     }
 }
-async fn write_future(
+async fn read_chat_write_tcp(
     mut tcp_writer: OwnedWriteHalf,
-    mut broadcast_receiver: Receiver<String>,
+    mut chat_receiver: Receiver<String>,
 ) -> anyhow::Result<()> {
     loop {
-        let msg = broadcast_receiver.recv().await?;
+        let msg = chat_receiver.recv().await?;
         info!("sending: {}", msg);
         tcp_writer
             .write_all(format!("received: {}", msg).as_bytes())

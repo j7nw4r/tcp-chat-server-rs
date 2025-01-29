@@ -1,7 +1,8 @@
+/// A simple TCP chat server implemented in Rust using Tokio for asynchronous operations.
 use anyhow::{bail, Context};
 use std::net::{IpAddr, Ipv4Addr};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
@@ -10,23 +11,33 @@ use tokio::{
 };
 use tracing::{error, info};
 
+/// The main entry point of the application.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Initialize the tracing subscriber for logging.
     tracing_subscriber::fmt::init();
 
-    let tcp_listerner = tokio::net::TcpListener::bind((IpAddr::V4(Ipv4Addr::UNSPECIFIED), 23234))
+    // Bind the TCP listener to the specified IP address and port.
+    let tcp_listener = tokio::net::TcpListener::bind((IpAddr::V4(Ipv4Addr::UNSPECIFIED), 23234))
         .await
         .context("could not create TcpListener")?;
+    
+    // Create a broadcast channel for sending messages.
     let (sender, _) = tokio::sync::broadcast::channel::<String>(2);
 
     loop {
-        let (tcp_stream, addr) = tcp_listerner
+        // Accept incoming TCP connections.
+        let (tcp_stream, addr) = tcp_listener
             .accept()
             .await
             .context("could not accept from tcp_listener")?;
-        info!("received connection from  {}", addr);
+        
+        info!("received connection from {}", addr);
 
+        // Clone the sender for the new connection.
         let sender = sender.clone();
+        
+        // Spawn a new task to process the incoming stream.
         tokio::spawn(async move {
             match process_stream(tcp_stream, sender).await {
                 Ok(_) => (),
@@ -38,15 +49,19 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
+/// Processes the TCP stream by reading from it and writing to the chat.
 async fn process_stream(stream: TcpStream, sender: Sender<String>) -> anyhow::Result<()> {
+    // Split the TCP stream into a reader and a writer.
     let (tcp_reader, tcp_writer) = stream.into_split();
     let (broadcast_sender, broadcast_receiver) = (sender.clone(), sender.subscribe());
+    
+    // Use Tokio's select to wait for either reading from TCP or writing to chat.
     match tokio::select! {
         read_tcp_write_chat_result = read_tcp_write_chat(tcp_reader, broadcast_sender) => {
             info!("read_tcp_write_chat_result returned");
             read_tcp_write_chat_result
         },
-        read_chat_write_tcp_result = read_chat_write_tcp( tcp_writer, broadcast_receiver) => {
+        read_chat_write_tcp_result = read_chat_write_tcp(tcp_writer, broadcast_receiver) => {
             info!("read_chat_write_tcp_result returned");
             read_chat_write_tcp_result
         },
@@ -59,30 +74,39 @@ async fn process_stream(stream: TcpStream, sender: Sender<String>) -> anyhow::Re
     }
 }
 
+/// Reads messages from the TCP stream and sends them to the chat.
 async fn read_tcp_write_chat(
-    mut tcp_reader: OwnedReadHalf,
+    tcp_reader: OwnedReadHalf,
     chat_sender: Sender<String>,
 ) -> anyhow::Result<()> {
     loop {
         let mut buf: Vec<u8> = vec![0u8; 1024];
+        
+        // Wait until the TCP stream is readable.
         tcp_reader
             .readable()
             .await
             .context("could not determine if tcp stream was readable")?;
 
-        let _read_length = tcp_reader.read(&mut buf).await?;
+        
+        // Convert the bytes to a UTF-8 string.
         let msg = String::from_utf8(buf)?;
+        
+        // Send the message to the chat.
         if let Err(e) = chat_sender.send(msg) {
             error!("send_result : {}", e);
             bail!(e);
         }
     }
 }
+
+/// Receives messages from the chat and writes them to the TCP stream.
 async fn read_chat_write_tcp(
     mut tcp_writer: OwnedWriteHalf,
     mut chat_receiver: Receiver<String>,
 ) -> anyhow::Result<()> {
     loop {
+        // Wait for a message from the chat.
         let msg = match chat_receiver.recv().await {
             Ok(msg) => msg,
             Err(e) => {
@@ -93,6 +117,8 @@ async fn read_chat_write_tcp(
                 bail!(e)
             }
         };
+        
+        // Write the received message to the TCP stream.
         tcp_writer
             .write_all(format!("received: {}", msg).as_bytes())
             .await?;
